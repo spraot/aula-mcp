@@ -7,7 +7,7 @@
  * safe to paste into a GitHub issue when something fails.
  */
 
-import { mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import {
   AulaHttpClient,
@@ -26,7 +26,7 @@ import {
 import qrcode from 'qrcode-terminal';
 import { fail, fmt, info, ok, prompt, promptSecret, rule, selectFromList, warn } from '../io.ts';
 import { appendLoginLog } from '../login-log.ts';
-import { defaultStore, transcriptPath } from '../store.ts';
+import { aulaMcpDir, cookiesFile, defaultStore, transcriptPath } from '../store.ts';
 
 export interface LoginCommandArgs {
   username?: string;
@@ -119,6 +119,17 @@ export async function runLogin(args: LoginCommandArgs): Promise<void> {
       ...(identityName ? { identityName } : {}),
     };
     await defaultStore().save(record);
+
+    // Persist the cookie jar so `aula refresh-stepup` can attempt silent
+    // SSO against the broker (unilogin) without dragging the user through
+    // MitID every time the assurance level drops.
+    try {
+      await mkdir(aulaMcpDir(), { recursive: true });
+      const serialized = await http.jar.serialize();
+      await writeFile(cookiesFile(), serialized, { mode: 0o600 });
+    } catch (e) {
+      warn(`Could not persist cookies: ${(e as Error).message}`);
+    }
 
     ok(`Login successful. Tokens saved to ${fmt.dim(defaultStore().path)}`);
     info(

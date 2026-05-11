@@ -5,6 +5,7 @@
  *
  * Usage:
  *   aula login [--username <user>] [--method APP|CODE_TOKEN] [--debug] [--transcript <file>]
+ *   aula refresh-stepup [--json]
  *   aula status [--json]
  *   aula whoami [--json]
  *   aula doctor [--json] [--verbose]
@@ -19,6 +20,7 @@ import { runDoctor } from './commands/doctor.ts';
 import { runLog } from './commands/log.ts';
 import { runLogin } from './commands/login.ts';
 import { runLogout } from './commands/logout.ts';
+import { runRefreshStepup } from './commands/refresh-stepup.ts';
 import { runStatus } from './commands/status.ts';
 import { runTokensExport, runTokensImport } from './commands/tokens.ts';
 import { runTranscriptList, runTranscriptPrune, runTranscriptView } from './commands/transcript.ts';
@@ -31,6 +33,7 @@ const HELP = `${fmt.bold('aula')} — MCP-friendly Aula client
 ${fmt.bold('Usage')}:
   aula login [--username <user>] [--method APP|CODE_TOKEN] [--debug]
              [--transcript <file>]
+  aula refresh-stepup [--json]
   aula status [--json]
   aula whoami [--json]
   aula doctor [--json] [--verbose]
@@ -54,6 +57,11 @@ ${fmt.bold('Notes')}:
     when reporting issues.
   • aula doctor walks every read endpoint and reports per-call status.
   • aula log shows recent login attempts (success/failure + timestamps).
+  • aula refresh-stepup attempts a silent OIDC re-authorize using cookies
+    persisted by the last login. Succeeds without MitID prompt when the
+    broker session is still alive; falls back to "run aula login" when
+    not. Use this when messages/notifications start 403'ing while
+    calendar/presence still work.
   • aula tokens export <dir>  — write tokens.json + .key into <dir> for
     transfer (always re-encrypts with a fresh AES-GCM key). Pair with
     aula tokens import <dir> on the other machine, or scp the two files
@@ -159,6 +167,9 @@ async function main(): Promise<void> {
       }
       break;
     }
+    case 'refresh-stepup':
+      await runRefreshStepup({ json: args.flags.json === true });
+      break;
     case 'logout':
       await runLogout();
       break;
