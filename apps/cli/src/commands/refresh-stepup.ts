@@ -11,7 +11,7 @@
  * session gone, no persisted cookies, etc.). Run `aula login` then.
  */
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { chown, readFile, stat, writeFile } from 'node:fs/promises';
 import {
   AulaCookieJar,
   AulaHttpClient,
@@ -21,7 +21,7 @@ import {
   silentLogger,
 } from '@aula-mcp/aula-auth';
 import { fail, fmt, info, ok, printJson, warn } from '../io.ts';
-import { cookiesFile, defaultStore } from '../store.ts';
+import { aulaMcpDir, cookiesFile, defaultStore } from '../store.ts';
 
 export interface RefreshStepupCommandArgs {
   json?: boolean;
@@ -73,6 +73,15 @@ export async function runRefreshStepup(args: RefreshStepupCommandArgs = {}): Pro
     // and saving them keeps the next silent re-auth viable.
     try {
       await writeFile(cookiesFile(), await jar.serialize(), { mode: 0o600 });
+      try {
+        const dirStat = await stat(aulaMcpDir());
+        if (dirStat.uid !== process.getuid?.()) {
+          await chown(cookiesFile(), dirStat.uid, dirStat.gid);
+        }
+      } catch {
+        // chown is best-effort; non-root can't, and that's fine when
+        // the running user already owns the dir.
+      }
     } catch (e) {
       warn(`Could not re-persist cookies: ${(e as Error).message}`);
     }
