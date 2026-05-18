@@ -22,7 +22,7 @@ import { runLogin } from './commands/login.ts';
 import { runLogout } from './commands/logout.ts';
 import { runRefreshStepup } from './commands/refresh-stepup.ts';
 import { runStatus } from './commands/status.ts';
-import { runThreadsListIds } from './commands/threads.ts';
+import { runThreadFetch, runThreadsListIds } from './commands/threads.ts';
 import { runTokensExport, runTokensImport } from './commands/tokens.ts';
 import { runTranscriptList, runTranscriptPrune, runTranscriptView } from './commands/transcript.ts';
 import { runWhoami } from './commands/whoami.ts';
@@ -42,6 +42,7 @@ ${fmt.bold('Usage')}:
   aula tokens export <dir>
   aula tokens import <dir>
   aula threads list-ids [--page-size N] [--json]
+  aula thread fetch <id> [--page N]
   aula transcript list [--json]
   aula transcript view <file> [--json]
   aula transcript prune [--keep N] [--dry-run]
@@ -153,6 +154,31 @@ async function main(): Promise<void> {
         default:
           process.stderr.write(`Unknown threads subcommand: ${sub ?? '<missing>'}\n`);
           process.stderr.write('Try: aula threads list-ids [--page-size N]\n');
+          process.exit(2);
+      }
+      break;
+    }
+    case 'thread': {
+      const sub = args.positional[0];
+      switch (sub) {
+        case 'fetch': {
+          const idRaw = args.positional[1];
+          const threadId = idRaw ? Number.parseInt(idRaw, 10) : NaN;
+          if (!Number.isFinite(threadId) || threadId <= 0) {
+            process.stderr.write('Usage: aula thread fetch <id> [--page N]\n');
+            process.exit(2);
+          }
+          const pageRaw = args.flags.page;
+          const page = typeof pageRaw === 'string' ? Number.parseInt(pageRaw, 10) : undefined;
+          await runThreadFetch({
+            threadId,
+            ...(typeof page === 'number' && Number.isFinite(page) ? { page } : {}),
+          });
+          break;
+        }
+        default:
+          process.stderr.write(`Unknown thread subcommand: ${sub ?? '<missing>'}\n`);
+          process.stderr.write('Try: aula thread fetch <id> [--page N]\n');
           process.exit(2);
       }
       break;
