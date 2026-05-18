@@ -7,6 +7,7 @@
  * `aula login` from the terminal "just works" with any running server.
  */
 
+import { type FSWatcher, watch } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -52,11 +53,66 @@ export class AulaContext {
    *  or an opaque alphanumeric token; we treat it as opaque to match
    *  upstream Python's `str(child["userId"])` handling. */
   private cachedGuardianUserId: string | undefined;
+  private tokenFileWatcher: FSWatcher | undefined;
+  private tokenFileChangeDebounce: NodeJS.Timeout | undefined;
 
   constructor(options: AulaContextOptions = {}) {
     this.store = options.store ?? defaultStore();
     this.logger = options.logger ?? silentLogger;
     this.http = new AulaHttpClient({ logger: this.logger });
+    this.watchTokenFile();
+  }
+
+  /**
+   * If the underlying store is file-backed, watch its path and invalidate the
+   * cached client whenever the file changes (e.g. an out-of-band `aula login`
+   * or `aula refresh-stepup` rotates tokens). Without this, the cached client
+   * keeps serving 401/403 against the rotated session until its access token
+   * naturally expires (~60min).
+   *
+   * Best-effort: errors here are non-fatal. The original token-expiry
+   * invalidation in `getClient()` is still the backstop.
+   */
+  private watchTokenFile(): void {
+    if (!(this.store instanceof EncryptedFileTokenStore)) return;
+    const path = this.store.filePath;
+    try {
+      this.tokenFileWatcher = watch(path, { persistent: false }, (eventType) => {
+        // fs.watch tends to fire multiple events per write (the writer does
+        // write + close + chmod). Debounce so we only invalidate once.
+        if (this.tokenFileChangeDebounce) clearTimeout(this.tokenFileChangeDebounce);
+        this.tokenFileChangeDebounce = setTimeout(() => {
+          this.tokenFileChangeDebounce = undefined;
+          this.logger.info('aula-context.token_file_changed_invalidating', {
+            path,
+            eventType,
+          });
+          this.invalidate();
+        }, 250);
+      });
+      this.tokenFileWatcher.on('error', (err) => {
+        this.logger.warn('aula-context.token_file_watch_error', {
+          path,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    } catch (err) {
+      this.logger.warn('aula-context.token_file_watch_setup_failed', {
+        path,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /** Close the token-file watcher. Tests should call this; long-lived servers
+   *  can leave it until process exit. */
+  dispose(): void {
+    if (this.tokenFileChangeDebounce) {
+      clearTimeout(this.tokenFileChangeDebounce);
+      this.tokenFileChangeDebounce = undefined;
+    }
+    this.tokenFileWatcher?.close();
+    this.tokenFileWatcher = undefined;
   }
 
   /**
