@@ -72,10 +72,17 @@ export class AulaContext {
    *
    * Best-effort: errors here are non-fatal. The original token-expiry
    * invalidation in `getClient()` is still the backstop.
+   *
+   * Duck-typed (`'filePath' in store && typeof string`) rather than
+   * `instanceof EncryptedFileTokenStore`: Bun's `--compile` bundler can
+   * produce two copies of the same class when the package is imported via
+   * different specifiers across the bundled graph, breaking `instanceof`
+   * silently — the watcher then never gets attached and stale tokens linger.
    */
   private watchTokenFile(): void {
-    if (!(this.store instanceof EncryptedFileTokenStore)) return;
-    const path = this.store.filePath;
+    const filePath = (this.store as { filePath?: unknown }).filePath;
+    if (typeof filePath !== 'string' || filePath.length === 0) return;
+    const path = filePath;
     try {
       this.tokenFileWatcher = watch(path, { persistent: false }, (eventType) => {
         // fs.watch tends to fire multiple events per write (the writer does
