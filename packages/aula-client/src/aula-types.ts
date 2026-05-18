@@ -177,6 +177,11 @@ export interface MessageThread {
   subject?: string;
   /** Latest message's preview, when included. */
   lastMessage?: { sendDateTime?: string; sender?: { fullName?: string } };
+  /** Latest message, when included in the threads list response. Distinct
+   *  from `lastMessage` (preview-only): `latestMessage.id` is what scripts
+   *  need to detect "is there a new message in this thread" without
+   *  fetching the full thread content via `messaging.getMessagesForThread`. */
+  latestMessage?: { id?: string; sendDateTime?: string };
 }
 
 export interface ThreadsData {

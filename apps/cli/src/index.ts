@@ -22,6 +22,7 @@ import { runLogin } from './commands/login.ts';
 import { runLogout } from './commands/logout.ts';
 import { runRefreshStepup } from './commands/refresh-stepup.ts';
 import { runStatus } from './commands/status.ts';
+import { runThreadsListIds } from './commands/threads.ts';
 import { runTokensExport, runTokensImport } from './commands/tokens.ts';
 import { runTranscriptList, runTranscriptPrune, runTranscriptView } from './commands/transcript.ts';
 import { runWhoami } from './commands/whoami.ts';
@@ -40,6 +41,7 @@ ${fmt.bold('Usage')}:
   aula log [--last N] [--json]
   aula tokens export <dir>
   aula tokens import <dir>
+  aula threads list-ids [--page-size N] [--json]
   aula transcript list [--json]
   aula transcript view <file> [--json]
   aula transcript prune [--keep N] [--dry-run]
@@ -132,6 +134,25 @@ async function main(): Promise<void> {
         default:
           process.stderr.write(`Unknown tokens subcommand: ${sub ?? '<missing>'}\n`);
           process.stderr.write('Try: aula tokens {export <dir>|import <dir>}\n');
+          process.exit(2);
+      }
+      break;
+    }
+    case 'threads': {
+      const sub = args.positional[0];
+      switch (sub) {
+        case 'list-ids': {
+          const pageSizeRaw = args.flags.pageSize ?? args.flags['page-size'];
+          const pageSize =
+            typeof pageSizeRaw === 'string' ? Number.parseInt(pageSizeRaw, 10) : undefined;
+          await runThreadsListIds({
+            ...(typeof pageSize === 'number' && Number.isFinite(pageSize) ? { pageSize } : {}),
+          });
+          break;
+        }
+        default:
+          process.stderr.write(`Unknown threads subcommand: ${sub ?? '<missing>'}\n`);
+          process.stderr.write('Try: aula threads list-ids [--page-size N]\n');
           process.exit(2);
       }
       break;
