@@ -386,6 +386,15 @@ export function registerTools(server: McpServer, context: AulaContext): void {
     },
     async (args) => {
       const client = await context.getClient();
+      // Prime the guardian profile before fetching. Aula's
+      // messaging.getMessagesForThread returns HTTP 403 if the
+      // guardian profile hasn't been activated on the server side
+      // this session, even with a fully step-up'd bearer. aula.discover
+      // implicitly primes via getGuardianUserId() — but if the agent
+      // calls get_thread directly (cached threadId from a prior turn,
+      // skipping discover), no priming has happened. getGuardianUserId
+      // memoises after the first call, so this is a no-op once primed.
+      await context.getGuardianUserId();
       try {
         return jsonContent(
           await client.getMessagesForThread(args.threadId, {
