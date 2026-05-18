@@ -3,6 +3,9 @@
  * Inputs are validated by Zod 4 schemas registered with McpServer.
  */
 
+import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AulaStepUpRequiredError, isoWeekString } from '@aula-mcp/aula-client';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
@@ -420,6 +423,81 @@ export function registerTools(server: McpServer, context: AulaContext): void {
         }
         throw e;
       }
+    },
+  );
+
+  // --- aula.messages.get_attachment ----------------------------------------
+  //
+  // Download a message attachment server-side and return a local file path.
+  // Necessary because Aula attachment URLs are CloudFront presigned links
+  // with long opaque signatures; LLMs frequently corrupt them when echoing
+  // the URL into other tool calls (the typical symptom is a chain of
+  // MalformedSignature / AccessDenied 403s from S3 even though the URL is
+  // still within its 1h validity window). Returning a local path keeps the
+  // URL out of the model's emit path entirely.
+
+  server.registerTool(
+    'aula.messages.get_attachment',
+    {
+      title: 'Download a thread attachment to local disk',
+      description:
+        'Download an attachment from a thread message and write it to a ' +
+        'local temporary file, returning the file path. Prefer this over ' +
+        'passing Aula attachment URLs through the model — CloudFront ' +
+        'presigned URLs are long opaque blobs that LLMs often mangle when ' +
+        'echoing into tool calls (MalformedSignature / AccessDenied 403). ' +
+        '`attachmentIndex` is zero-based across all attachments in the ' +
+        'thread, flattened message-by-message in the order returned by ' +
+        '`aula.messages.get_thread`.',
+      inputSchema: {
+        threadId: z.number().int().positive(),
+        attachmentIndex: z.number().int().min(0),
+      },
+    },
+    async (args) => {
+      const client = await context.getClient();
+      await context.getGuardianUserId();
+      // Re-fetch the thread to get a fresh URL; presigned URLs age out
+      // within ~1h and we never want to download against a cached one.
+      const { messages } = await client.getMessagesForThread(args.threadId);
+      const flat = messages.flatMap((m) => m.attachments ?? []);
+      const att = flat[args.attachmentIndex];
+      if (!att?.file?.url) {
+        return jsonContent({
+          error: 'attachment_not_found',
+          threadId: args.threadId,
+          attachmentIndex: args.attachmentIndex,
+          totalAttachments: flat.length,
+        });
+      }
+      const url = att.file.url;
+      const filename = att.file.name ?? `attachment-${args.attachmentIndex}.bin`;
+      // CloudFront presigned URLs don't want Aula cookies / Auth headers
+      // — the signature IS the auth, and extra headers can interfere.
+      // Use plain fetch (not AulaHttpClient, which adds defaults).
+      const res = await fetch(url);
+      if (!res.ok) {
+        const body = (await res.text()).slice(0, 300);
+        return jsonContent({
+          error: 'download_failed',
+          httpStatus: res.status,
+          filename,
+          body,
+        });
+      }
+      const buf = Buffer.from(await res.arrayBuffer());
+      const baseDir = process.env.AULA_MCP_ATTACHMENTS_DIR ?? join(tmpdir(), 'aula-attachments');
+      await mkdir(baseDir, { recursive: true });
+      const safeName = filename.replace(/[^\w.\- ]+/gu, '_');
+      const path = join(baseDir, `${args.threadId}-${args.attachmentIndex}-${safeName}`);
+      await writeFile(path, buf, { mode: 0o600 });
+      return jsonContent({
+        ok: true,
+        path,
+        filename,
+        bytes: buf.length,
+        ...(att.file.mediaType ? { mediaType: att.file.mediaType } : {}),
+      });
     },
   );
 }

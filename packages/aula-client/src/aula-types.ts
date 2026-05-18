@@ -188,12 +188,25 @@ export interface ThreadsData {
   threads: MessageThread[];
 }
 
+/** One file attached to a thread message. Aula wraps each entry in a `file`
+ *  envelope; the URL is a short-lived CloudFront presigned link (~1h TTL). */
+export interface ThreadMessageAttachment {
+  file?: {
+    name?: string;
+    url?: string;
+    mediaType?: string | null;
+    size?: number | null;
+  };
+}
+
 export interface ThreadMessage {
   messageType?: string;
   text?: { html?: string; plain?: string };
   sender?: { fullName?: string };
   subject?: string;
   sendDateTime?: string;
+  hasAttachments?: boolean;
+  attachments?: ThreadMessageAttachment[];
 }
 
 export interface ThreadMessagesData {
