@@ -124,6 +124,9 @@ export function registerTools(server: McpServer, context: AulaContext): void {
     },
     async () => {
       const client = await context.getClient();
+      // See aula.messages.get_thread below — guardian profile must be
+      // primed or Aula's `*ForActiveProfile` endpoints 403.
+      await context.getGuardianUserId();
       return jsonContent(await client.getNotifications());
     },
   );
@@ -142,6 +145,9 @@ export function registerTools(server: McpServer, context: AulaContext): void {
     },
     async (args) => {
       const client = await context.getClient();
+      // See aula.messages.get_thread below — profile-scoped feed needs
+      // the guardian profile activated, or Aula 403s.
+      await context.getGuardianUserId();
       return jsonContent(
         await client.getPosts({
           ...(args.limit !== undefined ? { limit: args.limit } : {}),
@@ -189,6 +195,9 @@ export function registerTools(server: McpServer, context: AulaContext): void {
     },
     async (args) => {
       const client = await context.getClient();
+      // See aula.messages.get_thread below — messaging endpoints 403
+      // until the guardian profile is activated server-side.
+      await context.getGuardianUserId();
       const threads = await client.getThreads({
         ...(args.page !== undefined ? { page: args.page } : {}),
         ...(args.pageSize !== undefined ? { pageSize: args.pageSize } : {}),
