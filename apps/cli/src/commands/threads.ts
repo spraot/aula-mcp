@@ -40,6 +40,13 @@ export async function runThreadsListIds(args: ThreadsListIdsCommandArgs = {}): P
 
   const client = new AulaClient({ tokens: record.tokens, http });
   try {
+    // Prime the session: messaging endpoints 403 if the guardian profile
+    // hasn't been activated. The MCP path always does this implicitly via
+    // `aula.discover` → `context.getGuardianUserId()`; doctor does it via
+    // its own preflight checks. A fresh-per-invocation CLI has neither, so
+    // we need an explicit call before `getThreads`. One extra API hop, but
+    // still no LLM cost.
+    await client.getProfileContext('guardian');
     const threads = await client.getThreads({ pageSize: args.pageSize ?? 20 });
     printJson({
       ok: true,
