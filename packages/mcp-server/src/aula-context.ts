@@ -8,14 +8,10 @@
  */
 
 import { type FSWatcher, watch } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import {
-  AulaCookieJar,
   AulaHttpClient,
-  AulaLoginClient,
-  AulaSilentSsoFailedError,
   EncryptedFileTokenStore,
   isTokenExpired,
   KeychainTokenStore,
@@ -226,98 +222,28 @@ export class AulaContext {
   }
 
   private async buildClient(): Promise<AulaClient> {
-    // Prefer silent OIDC re-authorize when the on-disk bearer is near expiry.
-    // A plain `refresh_token` grant returns a fresh access token but drops
-    // MitID step-up assurance — so notifications/posts immediately start
-    // 403'ing even though calendar/messages.list_threads keep working.
-    // Walking the OIDC silent-SSO chain (same path `aula refresh-stepup`
-    // takes) preserves step-up. Only attempted when the existing tokens are
-    // actually near expiry — otherwise withFreshTokens is a fast no-op.
-    const refreshed = await this.refreshWithStepupIfNeeded();
-    const record =
-      refreshed ??
-      (await withFreshTokens({
-        store: this.store,
-        http: this.http,
-        logger: this.logger,
-      }));
+    // Plain refresh_token grant. The scaarup/aula HA integration has
+    // proven empirically that Aula's OAuth server preserves the
+    // `aula-sensitive` scope through refresh_token grants — HA reads
+    // sensitive endpoints (messaging.getMessagesForThread) for months
+    // from a single MitID login using nothing but
+    // `grant_type=refresh_token` against simplesaml/.../token.php.
+    // Earlier suspicion that step-up assurance was bound to the
+    // broker session at unilogin.dk was a misdiagnosis — the 403s we
+    // were seeing were the v22→v23 apiVersion deprecation (fixed in
+    // 60c4246), not step-up loss. Silent SSO was "working" via side
+    // effect (each reauth rebuilt AulaContext via fs.watch
+    // invalidation, which re-probed apiVersion to v23). The `aula
+    // refresh-stepup` CLI command is kept as a manual recovery tool
+    // when the refresh_token chain breaks (e.g. after a long
+    // downtime), but the MCP child no longer invokes it.
+    const record = await withFreshTokens({
+      store: this.store,
+      http: this.http,
+      logger: this.logger,
+    });
     this.cachedRecord = record;
     return new AulaClient({ tokens: record.tokens, http: this.http, logger: this.logger });
-  }
-
-  /**
-   * If the stored bearer is near expiry AND persisted cookies exist, attempt
-   * a silent OIDC re-authorize to mint a fresh bearer that still carries
-   * MitID step-up assurance. Returns the refreshed record on success, null
-   * to fall through to the plain refresh_token grant.
-   *
-   * Best-effort: any failure (no cookies, broker session lapsed, transport
-   * error) returns null and lets withFreshTokens handle it.
-   */
-  private async refreshWithStepupIfNeeded(): Promise<StoredTokenRecord | null> {
-    const cookiesPath = this.cookiesPath();
-    if (!cookiesPath) return null;
-    const existing = await this.store.load();
-    if (!existing) return null;
-    if (!isTokenExpired(existing.tokens, 60)) return existing;
-
-    let cookiesRaw: string;
-    try {
-      cookiesRaw = await readFile(cookiesPath, 'utf8');
-    } catch (err) {
-      this.logger.warn('aula-context.silent_reauth.no_cookies', {
-        path: cookiesPath,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return null;
-    }
-
-    try {
-      const jar = await AulaCookieJar.deserialize(cookiesRaw);
-      const reauthHttp = new AulaHttpClient({ logger: this.logger, jar });
-      const loginClient = new AulaLoginClient({ http: reauthHttp, logger: this.logger });
-      const tokens = await loginClient.attemptSilentReauthorize();
-      const fresh: StoredTokenRecord = {
-        ...existing,
-        tokens,
-        saved_at: Math.floor(Date.now() / 1000),
-      };
-      await this.store.save(fresh);
-      // Re-persist cookies — the silent-SSO walk sets fresh broker cookies
-      // and we need them in place for the next silent reauth tick.
-      try {
-        await writeFile(cookiesPath, await jar.serialize(), { mode: 0o600 });
-      } catch (err) {
-        this.logger.warn('aula-context.silent_reauth.cookies_persist_failed', {
-          path: cookiesPath,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-      this.logger.info('aula-context.silent_reauth.success', {
-        expires_at: tokens.expires_at,
-      });
-      return fresh;
-    } catch (err) {
-      if (err instanceof AulaSilentSsoFailedError) {
-        this.logger.warn('aula-context.silent_reauth.broker_session_lapsed', {
-          message:
-            'Falling back to refresh_token grant; step-up will be missing until next `aula login` / systemd refresh-stepup.',
-        });
-      } else {
-        this.logger.warn('aula-context.silent_reauth.error', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-      return null;
-    }
-  }
-
-  /** Derive cookies.json path from the token store's filePath (same dir).
-   *  Returns null for non-file-backed stores (e.g. Keychain). */
-  private cookiesPath(): string | null {
-    const filePath = (this.store as { filePath?: unknown }).filePath;
-    if (typeof filePath !== 'string' || filePath.length === 0) return null;
-    return join(dirname(filePath), 'cookies.json');
   }
 }
 
