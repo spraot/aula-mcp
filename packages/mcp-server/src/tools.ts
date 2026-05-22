@@ -485,7 +485,25 @@ export function registerTools(server: McpServer, context: AulaContext): void {
           body,
         });
       }
+      const ATTACHMENT_MAX_BYTES = 50 * 1024 * 1024;
+      const declared = Number(res.headers.get('content-length') ?? '0');
+      if (declared > ATTACHMENT_MAX_BYTES) {
+        return jsonContent({
+          error: 'attachment_too_large',
+          filename,
+          bytes: declared,
+          maxBytes: ATTACHMENT_MAX_BYTES,
+        });
+      }
       const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.byteLength > ATTACHMENT_MAX_BYTES) {
+        return jsonContent({
+          error: 'attachment_too_large',
+          filename,
+          bytes: buf.byteLength,
+          maxBytes: ATTACHMENT_MAX_BYTES,
+        });
+      }
       const baseDir = process.env.AULA_MCP_ATTACHMENTS_DIR ?? join(tmpdir(), 'aula-attachments');
       await mkdir(baseDir, { recursive: true });
       const safeName = filename.replace(/[^\w.\- ]+/gu, '_');
