@@ -63,8 +63,8 @@ ${fmt.bold('Notes')}:
   • aula refresh-stepup attempts a silent OIDC re-authorize using cookies
     persisted by the last login. Succeeds without MitID prompt when the
     broker session is still alive; falls back to "run aula login" when
-    not. Use this when messages/notifications start 403'ing while
-    calendar/presence still work.
+    not. Manual recovery tool — rarely needed since the plain
+    refresh_token grant preserves sensitive scope.
   • aula tokens export <dir>  — write tokens.json + .key into <dir> for
     transfer (always re-encrypts with a fresh AES-GCM key). Pair with
     aula tokens import <dir> on the other machine, or scp the two files
